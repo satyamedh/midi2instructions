@@ -135,7 +135,7 @@ print([str(event) for event in normalized_events])
 # each event can be boiled down to 32 bits, 16 bits for frequency, 16 bits for duration in ms, all appended to a single array
 # parser can read one event at a time, thus no need for delimiters or headers blah blah
 # two modes of export, C++ array or just raw hex
-EXPORT_MODE = "C++" #  "BIN" or "C++"
+EXPORT_MODE = "ASM" #  "BIN" or "C++" or "ASM"
 
 # First, convert to an array of 32-bit integers, one entry for each event
 export_data = []
@@ -156,6 +156,16 @@ elif EXPORT_MODE == "BIN":
     # lowk just print it as one continuous hex string, which can be pasted in the assembly code later
     data_string = "".join(f"{data:08X}" for data in export_data)
     print(data_string)
+
+elif EXPORT_MODE == "ASM":
+    # Export as assembly .word directives
+    with open("exported_data.asm", "w") as f:
+        f.write("midi_events:\n")
+        for data in export_data:
+            frequency = (data >> 16) & 0xFFFF
+            duration = data & 0xFFFF
+            f.write(f"    .word ${frequency:04X}, ${duration:04X}\n")
+        f.write("midi_events_end:\n")
 
 
 

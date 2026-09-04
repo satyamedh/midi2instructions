@@ -3,7 +3,7 @@ from mido import MidiFile
 import numpy as np
 import sounddevice as sd
 
-mid = MidiFile('edited_rickroll_simple.mid')
+mid = MidiFile('tetris_edited.mid')
 
 for i, track in enumerate(mid.tracks):
     print('Track {}: {}'.format(i, track.name))
@@ -41,6 +41,12 @@ def play_frequency(frequency, duration_ms):
     sd.play(audio, samplerate=sample_rate)
     sd.wait()
 
+def get_timer1_ticks_from_hz(freq: int, CPU_F: int) -> int:
+    ocr = int((CPU_F / (2 * freq)) - 1)
+    if ocr > 0xffff:
+        raise ValueError(f"Frequency {freq} is too low for CPU frequency {CPU_F}'s default prescalar bits. OCR value exceeds 16-bit limit!!")
+    return ocr
+
 class TrackEvent:
     def __init__(self, note: int, time: int):
         self.note = note # -1 is no note, 0-127 are valid midi notes
@@ -62,11 +68,11 @@ last_event_tick = 0 # will use these to calculate deltas
 
 ticks_per_beat = mid.ticks_per_beat
 
-
+set = False
 # extract events from the piano track
 for i, track in enumerate(mid.tracks):
     print('Track {}: {}'.format(i, track.name))
-    if track.name == "Piano":
+    if track.name == "Piano" or track.name == "Piano, Piano":
         # dump to [events] for parsing
         for msg in track:
             current_tick += msg.time
@@ -135,7 +141,7 @@ print([str(event) for event in normalized_events])
 # each event can be boiled down to 32 bits, 16 bits for frequency, 16 bits for duration in ms, all appended to a single array
 # parser can read one event at a time, thus no need for delimiters or headers blah blah
 # two modes of export, C++ array or just raw hex
-EXPORT_MODE = "ASM" #  "BIN" or "C++" or "ASM"
+EXPORT_MODE = "C++" #  "BIN" or "C++" or "ASM" or "ASM_T1T"
 
 # First, convert to an array of 32-bit integers, one entry for each event
 export_data = []
@@ -166,6 +172,18 @@ elif EXPORT_MODE == "ASM":
             duration = data & 0xFFFF
             f.write(f"    .dw ${frequency:04X}, ${duration:04X}\n")
         f.write("midi_events_end:\n")
+
+elif EXPORT_MODE == "ASM_T1T":
+    # Export as assembly .word directives but with T1 ticks instead of freq
+    with open("exported_data_t1t.asm", "w") as f:
+        f.write("midi_events:\n")
+        for data in export_data:
+            frequency = (data >> 16) & 0xFFFF
+            t1_ticks = get_timer1_ticks_from_hz(frequency, CPU_F=16000000) if frequency > 0 else 0
+            duration = data & 0xFFFF
+            f.write(f"    .dw ${t1_ticks:04X}, ${duration:04X}\n")
+        f.write("midi_events_end:\n")
+
 
 
 

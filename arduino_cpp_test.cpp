@@ -270,6 +270,7 @@ const uint32_t midi_events[] = {
     0x020B03E7,
 };
 
+
 const size_t NUM_EVENTS = sizeof(midi_events) / sizeof(midi_events[0]);
 
 void setup() {

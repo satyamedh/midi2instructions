@@ -3,6 +3,13 @@
 .equ DDRB = 4
 .equ PORTB = 5
 
+.equ TCCR1A = 0x80
+.equ TCCR1B = 0x81
+.equ TCNT1L = 0x84
+.equ TCNT1H = 0x85
+.equ OCR1AL = 0x88
+.equ OCR1AH = 0x89
+
 .def XL = r26
 .def XH = r27
 
@@ -12,9 +19,7 @@
 .def ZL = r30
 .def ZH = r31
 
-; apparently AVRA doesn't know about X, Y, and Z smh
-
-ldi r16,$30 ; 0011 0000
+ldi r16,$3F ; 0011 1111 idk which one is pin 9
 out DDRB,r16
 
 ldi r16,$20 ; 0011 0000
@@ -55,8 +60,9 @@ next_item:
     ; rcall sendregisterstolaptop
 
     ; check if frequency is zero, which is for a wait event
-    or XH, XL
-    breq wait_duration
+    mov r16, XH
+    or r16, XL
+    breq wait_event
 
     ; frequency is not zero, so we need to play a note
     ; will write subroutine later TODO
@@ -65,13 +71,19 @@ next_item:
     rcall play_note
     rjmp finisher
 
+wait_event:
+    ; wait for duration in Y
+    rcall wait_duration
+
 finisher:
     ; decrement counter
+    ; rcall sendregisterstolaptop ; to indicate end of an event, for debugging
 
     subi r17, 1
     sbci r18, 0
 
-    or r17, r18
+    mov r16, r17
+    or r16, r18
     brne next_item ; more events to process!
 
     ; we're done
@@ -97,7 +109,6 @@ wait_1ms_loop:
 wait_duration:
     ; wait for duration in Y
     ; first copy Y to our own registers so we dont modify Y
-
     mov r19, YL
     mov r20, YH
 
@@ -112,287 +123,321 @@ wait_duration_loop:
 
 play_note:
     ; play note with frequency in X for duration in Y
-    ; will write subroutine later TODO
-    ; for now, just return
+    ; X contains the OCR1A value for the note frequency, precalculated by python
 
-    ; option (a): timer but i dont wanna sit and configure it
-    ; option (b): l o o p s
+    rcall note_on
+    rcall wait_duration
+    rcall note_off
 
     ret
 
 
+note_on:
+    ; turn on note with frequency in X
+    ; configure timer1
+
+    ; connect OC1A to pin 9
+    ldi r23, 0b01000000
+    sts TCCR1A, r23
+
+    ; reset timer1 counter
+    ldi r23, 0x00
+    sts TCNT1H, r23
+    sts TCNT1L, r23
+
+    ; set OCR1A to frequency in X
+    sts OCR1AH, XH
+    sts OCR1AL, XL
+
+    ; set timer1 to CTC mode, toggle OC1A on compare match, prescaler = 0b001 (no prescaling)
+    ldi r23, 0b00001001 ; 0x09, CTC mode, toggle OC1A on compare match, prescaler = 1
+    sts TCCR1B, r23
+
+
+    ret
+
+note_off:
+    ; turn off note with frequency in X
+
+    ; turn off timer1
+    ldi r23, 0b00000000 ; 0x00, stop
+    sts TCCR1B, r23
+    sts TCCR1A, r23
+
+    ret
+
 midi_events:
-    .dw $020B, $02ED
+    .dw $3BBF, $02ED
     .dw $0000, $0029
-    .dw $024B, $0464
+    .dw $353B, $0464
     .dw $0000, $00C0
-    .dw $024B, $02ED
+    .dw $353B, $02ED
     .dw $0000, $0029
-    .dw $0293, $02ED
+    .dw $2F6A, $02ED
     .dw $0000, $0029
-    .dw $0310, $007C
+    .dw $27DB, $007C
     .dw $0000, $0008
-    .dw $02BA, $007C
+    .dw $2CC4, $007C
     .dw $0000, $0008
-    .dw $0293, $00F9
+    .dw $2F6A, $00F9
     .dw $0000, $000E
-    .dw $020B, $02ED
+    .dw $3BBF, $02ED
     .dw $0000, $0029
-    .dw $024B, $0464
+    .dw $353B, $0464
     .dw $0000, $00C0
-    .dw $01EE, $03E7
+    .dw $3F41, $03E7
     .dw $0000, $013D
-    .dw $0188, $00F9
+    .dw $4FB7, $00F9
     .dw $0000, $000E
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $020B, $0176
+    .dw $3BBF, $0176
     .dw $0000, $0015
-    .dw $020B, $02ED
+    .dw $3BBF, $02ED
     .dw $0000, $0029
-    .dw $024B, $0464
+    .dw $353B, $0464
     .dw $0000, $00C0
-    .dw $024B, $02ED
+    .dw $353B, $02ED
     .dw $0000, $0029
-    .dw $0293, $02ED
+    .dw $2F6A, $02ED
     .dw $0000, $0029
-    .dw $0310, $007C
+    .dw $27DB, $007C
     .dw $0000, $0008
-    .dw $02BA, $007C
+    .dw $2CC4, $007C
     .dw $0000, $0008
-    .dw $0293, $00F9
+    .dw $2F6A, $00F9
     .dw $0000, $000E
-    .dw $020B, $02ED
+    .dw $3BBF, $02ED
     .dw $0000, $0029
-    .dw $024B, $0464
+    .dw $353B, $0464
     .dw $0000, $00C0
-    .dw $01EE, $00F9
+    .dw $3F41, $00F9
     .dw $0000, $000E
-    .dw $020B, $00F9
+    .dw $3BBF, $00F9
     .dw $0000, $000E
-    .dw $020B, $01F3
+    .dw $3BBF, $01F3
     .dw $0000, $0646
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $020B, $01F3
+    .dw $3BBF, $01F3
     .dw $0000, $001B
-    .dw $020B, $00F9
+    .dw $3BBF, $00F9
     .dw $0000, $000E
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $000E
-    .dw $01EE, $0176
+    .dw $3F41, $0176
     .dw $0000, $0015
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $0188, $0464
+    .dw $4FB7, $0464
     .dw $0000, $03D5
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $01EE, $00F9
+    .dw $3F41, $00F9
     .dw $0000, $000E
-    .dw $020B, $00F9
+    .dw $3BBF, $00F9
     .dw $0000, $000E
-    .dw $01B8, $01F3
+    .dw $4704, $01F3
     .dw $0000, $001B
-    .dw $0188, $00F9
+    .dw $4FB7, $00F9
     .dw $0000, $000E
-    .dw $0310, $0106
+    .dw $27DB, $0106
     .dw $0000, $0108
-    .dw $0310, $00F9
+    .dw $27DB, $00F9
     .dw $0000, $000E
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $0532
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $01EE, $00F9
+    .dw $3F41, $00F9
     .dw $0000, $000E
-    .dw $020B, $00F9
+    .dw $3BBF, $00F9
     .dw $0000, $000E
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $020B, $00F9
+    .dw $3BBF, $00F9
     .dw $0000, $000E
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $0115
-    .dw $01EE, $00F9
+    .dw $3F41, $00F9
     .dw $0000, $000E
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $0188, $02ED
+    .dw $4FB7, $02ED
     .dw $0000, $033E
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $01EE, $00F9
+    .dw $3F41, $00F9
     .dw $0000, $000E
-    .dw $020B, $00F9
+    .dw $3BBF, $00F9
     .dw $0000, $000E
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $0188, $01F3
+    .dw $4FB7, $01F3
     .dw $0000, $001B
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $000E
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $000E
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $000E
-    .dw $0293, $00F9
+    .dw $2F6A, $00F9
     .dw $0000, $000E
-    .dw $024B, $01F3
+    .dw $353B, $01F3
     .dw $0000, $022A
-    .dw $020B, $0464
+    .dw $3BBF, $0464
     .dw $0000, $00C0
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $000E
-    .dw $0293, $00F9
+    .dw $2F6A, $00F9
     .dw $0000, $000E
-    .dw $020B, $00F9
+    .dw $3BBF, $00F9
     .dw $0000, $000E
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $000E
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $000E
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $000E
-    .dw $0293, $00F9
+    .dw $2F6A, $00F9
     .dw $0000, $000E
-    .dw $024B, $01F3
+    .dw $353B, $01F3
     .dw $0000, $001B
-    .dw $0188, $01F3
+    .dw $4FB7, $01F3
     .dw $0000, $0438
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $01EE, $00F9
+    .dw $3F41, $00F9
     .dw $0000, $000E
-    .dw $020B, $00F9
+    .dw $3BBF, $00F9
     .dw $0000, $000E
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $0115
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $000E
-    .dw $0293, $00F9
+    .dw $2F6A, $00F9
     .dw $0000, $000E
-    .dw $024B, $02ED
+    .dw $353B, $02ED
     .dw $0000, $0029
-    .dw $0188, $007C
+    .dw $4FB7, $007C
     .dw $0000, $0008
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $020B, $007C
+    .dw $3BBF, $007C
     .dw $0000, $0008
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $0293, $0176
+    .dw $2F6A, $0176
     .dw $0000, $0015
-    .dw $0293, $0176
+    .dw $2F6A, $0176
     .dw $0000, $0015
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $021D
-    .dw $0188, $007C
+    .dw $4FB7, $007C
     .dw $0000, $0008
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $020B, $007C
+    .dw $3BBF, $007C
     .dw $0000, $0008
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $024B, $0176
+    .dw $353B, $0176
     .dw $0000, $0015
-    .dw $024B, $0176
+    .dw $353B, $0176
     .dw $0000, $0015
-    .dw $020B, $0176
+    .dw $3BBF, $0176
     .dw $0000, $0015
-    .dw $01EE, $007C
+    .dw $3F41, $007C
     .dw $0000, $0008
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $0188, $007C
+    .dw $4FB7, $007C
     .dw $0000, $0008
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $020B, $007C
+    .dw $3BBF, $007C
     .dw $0000, $0008
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $020B, $01F3
+    .dw $3BBF, $01F3
     .dw $0000, $001B
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $000E
-    .dw $01EE, $0176
+    .dw $3F41, $0176
     .dw $0000, $0015
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $0188, $01F3
+    .dw $4FB7, $01F3
     .dw $0000, $001B
-    .dw $0188, $00F9
+    .dw $4FB7, $00F9
     .dw $0000, $000E
-    .dw $024B, $01F3
+    .dw $353B, $01F3
     .dw $0000, $001B
-    .dw $020B, $03E7
+    .dw $3BBF, $03E7
     .dw $0000, $0036
-    .dw $0188, $007C
+    .dw $4FB7, $007C
     .dw $0000, $0008
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $020B, $007C
+    .dw $3BBF, $007C
     .dw $0000, $0008
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $0293, $0176
+    .dw $2F6A, $0176
     .dw $0000, $0015
-    .dw $0293, $0176
+    .dw $2F6A, $0176
     .dw $0000, $0015
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $021D
-    .dw $0188, $007C
+    .dw $4FB7, $007C
     .dw $0000, $0008
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $020B, $007C
+    .dw $3BBF, $007C
     .dw $0000, $0008
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $0310, $01F3
+    .dw $27DB, $01F3
     .dw $0000, $001B
-    .dw $01EE, $00F9
+    .dw $3F41, $00F9
     .dw $0000, $000E
-    .dw $020B, $0176
+    .dw $3BBF, $0176
     .dw $0000, $0015
-    .dw $01EE, $007C
+    .dw $3F41, $007C
     .dw $0000, $0008
-    .dw $01B8, $00F9
+    .dw $4704, $00F9
     .dw $0000, $000E
-    .dw $0188, $007C
+    .dw $4FB7, $007C
     .dw $0000, $0008
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $020B, $007C
+    .dw $3BBF, $007C
     .dw $0000, $0008
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $020B, $01F3
+    .dw $3BBF, $01F3
     .dw $0000, $001B
-    .dw $024B, $00F9
+    .dw $353B, $00F9
     .dw $0000, $000E
-    .dw $01EE, $0176
+    .dw $3F41, $0176
     .dw $0000, $0015
-    .dw $01B8, $007C
+    .dw $4704, $007C
     .dw $0000, $0008
-    .dw $0188, $01F3
+    .dw $4FB7, $01F3
     .dw $0000, $001B
-    .dw $0188, $00F9
+    .dw $4FB7, $00F9
     .dw $0000, $000E
-    .dw $024B, $01F3
+    .dw $353B, $01F3
     .dw $0000, $001B
-    .dw $020B, $03E7
+    .dw $3BBF, $03E7
 midi_events_end:
 
-.equ num_events = (midi_events_end - midi_events) / 4
+.equ num_events = (midi_events_end - midi_events) / 2
 
-.include "rs232link.inc"
+; .include "rs232link.inc"

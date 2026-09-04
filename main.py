@@ -164,7 +164,7 @@ elif EXPORT_MODE == "ASM":
         for data in export_data:
             frequency = (data >> 16) & 0xFFFF
             duration = data & 0xFFFF
-            f.write(f"    .word ${frequency:04X}, ${duration:04X}\n")
+            f.write(f"    .dw ${frequency:04X}, ${duration:04X}\n")
         f.write("midi_events_end:\n")
 
 

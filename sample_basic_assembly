@@ -20,7 +20,14 @@ out DDRB,r16
 ldi r16,$20 ; 0011 0000
 out PORTB,r16
 
-; TODO: setup the clock speed to maybe 256Khz
+; test waiting for 1s
+; load 1000(0x03e8) into Y, and call wait_duration
+;testtt:
+;    ldi YL, 0xE8
+;    ldi YH, 0x03
+;    rcall wait_duration
+;    rcall sendr16tolaptop
+;    rjmp testtt
 
 ; Z = r31:r30
 ; Z points to start of midi_events
@@ -43,9 +50,13 @@ next_item:
 
     ; now, X = frequency, Y = duration
 
+    ; just to check if it's loading properly and terminating
+    ; mov r16,ZL
+    ; rcall sendregisterstolaptop
+
     ; check if frequency is zero, which is for a wait event
     or XH, XL
-    breq wait_event
+    breq wait_duration
 
     ; frequency is not zero, so we need to play a note
     ; will write subroutine later TODO
@@ -53,11 +64,6 @@ next_item:
 
     rcall play_note
     rjmp finisher
-
-wait_event:
-    ; wait for duration in Y
-    ; will write subroutine later TODO
-    rcall wait_duration
 
 finisher:
     ; decrement counter
@@ -77,12 +83,31 @@ done:
 
 ; subroutines
 
+wait_1ms:
+    ; 4-cycle loop, 16000 cycles, therefore 16000/4 = 4000 iterations, 0x0FA0
+    ldi r21, 0xA0
+    ldi r22, 0x0F
+
+wait_1ms_loop:
+    subi r21, 1
+    sbci r22, 0
+    brne wait_1ms_loop
+    ret
+
 wait_duration:
     ; wait for duration in Y
-    ; will write subroutine later TODO
-    ; for now, just return
+    ; first copy Y to our own registers so we dont modify Y
 
-    ; since we know the clock speed maybe we can just use a recursive loop, maybe one "standard" 1ms delay loop should help
+    mov r19, YL
+    mov r20, YH
+
+wait_duration_loop:
+    ; wait 1ms
+    rcall wait_1ms
+
+    subi r19, 1
+    sbci r20, 0
+    brne wait_duration_loop
     ret
 
 play_note:
@@ -369,3 +394,5 @@ midi_events:
 midi_events_end:
 
 .equ num_events = (midi_events_end - midi_events) / 4
+
+.include "rs232link.inc"

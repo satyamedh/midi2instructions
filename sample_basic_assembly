@@ -1,3 +1,5 @@
+; Written by Satyamedh Hulyalkar(3881431) and Alexandar Diamantopoulos(3162990)
+
 .device atmega328p
 
 ; mmio registers

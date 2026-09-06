@@ -1,7 +1,8 @@
 .device atmega328p
 
-.equ DDRB = 4
-.equ PORTB = 5
+; mmio registers
+.equ DDRB = 0x04
+.equ PORTB = 0x05
 
 .equ TCCR1A = 0x80
 .equ TCCR1B = 0x81
@@ -10,6 +11,7 @@
 .equ OCR1AL = 0x88
 .equ OCR1AH = 0x89
 
+; 16-bit register pairs
 .def XL = r26
 .def XH = r27
 
@@ -19,25 +21,16 @@
 .def ZL = r30
 .def ZH = r31
 
-ldi r16,$3F ; 0011 1111 idk which one is pin 9
-out DDRB,r16
 
-ldi r16,$20 ; 0011 0000
-out PORTB,r16
-
-; test waiting for 1s
-; load 1000(0x03e8) into Y, and call wait_duration
-;testtt:
-;    ldi YL, 0xE8
-;    ldi YH, 0x03
-;    rcall wait_duration
-;    rcall sendr16tolaptop
-;    rjmp testtt
+ldi r16,$3F ; 0011 1111, unsure which one is pin 9
+out DDRB,r16 ; set to output
 
 ; Z = r31:r30
-; Z points to start of midi_events
+; we need to read midi_events(which is in program memory since we've just declared it with .dw),
+; thus we need to use the `lpm` instruction for this. `lpm` only works with the Z register pair,
+; so we need to set Z to point to the start of midi_events.
 
-ldi ZL, LOW(midi_events * 2)
+ldi ZL, LOW(midi_events * 2) ; *2 because we're using dw and the address is in bytes. 1 dw = 2 bytes
 ldi ZH, HIGH(midi_events * 2)
 
 ; Initialize counter
@@ -46,28 +39,22 @@ ldi r18, HIGH(num_events)
 
 next_item:
     ; use X for frequency, Y for duration
-    ; read from Z, and increment after with Z+
+    ; read from Z, and use the post-increment feature to SAVE CYCLES!
 
-    lpm XL, Z+ ; load low byte of frequency
-    lpm XH, Z+ ; load high byte of frequency
-    lpm YL, Z+ ; load low byte of duration
-    lpm YH, Z+ ; load high byte of duration
+    lpm XL, Z+ ; frequency
+    lpm XH, Z+
+    lpm YL, Z+ ; duration
+    lpm YH, Z+
 
     ; now, X = frequency, Y = duration
 
-    ; just to check if it's loading properly and terminating
-    ; mov r16,ZL
-    ; rcall sendregisterstolaptop
-
-    ; check if frequency is zero, which is for a wait event
+    ; check if frequency is zero
+    ; a zero frequency means no note should be played.
     mov r16, XH
     or r16, XL
     breq wait_event
 
     ; frequency is not zero, so we need to play a note
-    ; will write subroutine later TODO
-    ; for now,
-
     rcall play_note
     rjmp finisher
 
@@ -77,11 +64,10 @@ wait_event:
 
 finisher:
     ; decrement counter
-    ; rcall sendregisterstolaptop ; to indicate end of an event, for debugging
-
     subi r17, 1
     sbci r18, 0
 
+    ; check if we're done
     mov r16, r17
     or r16, r18
     brne next_item ; more events to process!
@@ -89,22 +75,30 @@ finisher:
     ; we're done
 
 done:
-    ; maybe wait for a while then restart, idk TODO
     rjmp done
-
 
 ; subroutines
 
 wait_1ms:
-    ; 4-cycle loop, 16000 cycles, therefore 16000/4 = 4000 iterations, 0x0FA0
-    ldi r21, 0xA0
-    ldi r22, 0x0F
+    ; 4-cycle loop, 16000 cycles @ 16MHz, therefore 16000/4 = 4000 iterations, 0x0FA0
+    ; however, we have overhead of the function header, return and the rcall to here.
+    ; total overhead is 2(header) + 4(return) + 3(rcall) = 9 cycles
+    ; add 3 nops to make it 12 cycles of overhead, then we can remove 3 iterations, thus 3997 iterations, which is 0x0F9D
+    nop           ; 1 overhead cycle
+    nop           ; 1 overhead cycle
+    nop           ; 1 overhead cycle
+    ldi r21, 0x9D ; 1 overhead cycle
+    ldi r22, 0x0F ; 1 overhead cycle
 
 wait_1ms_loop:
-    subi r21, 1
-    sbci r22, 0
-    brne wait_1ms_loop
-    ret
+    subi r21, 1         ; 1 cycle
+    sbci r22, 0         ; 1 cycle
+    brne wait_1ms_loop  ; 2 cycles if branch taken(which is always except for the last iteration), 1 otherwise
+    ; thus, the regular loop takes 4 cycles.
+    ; last cycle takes 3, so add a nop to compensate
+    nop ; compensated cycle
+    ret ; 4 cycles overhead
+
 
 wait_duration:
     ; wait for duration in Y
@@ -113,13 +107,15 @@ wait_duration:
     mov r20, YH
 
 wait_duration_loop:
-    ; wait 1ms
+    ; wait 1ms Y times
     rcall wait_1ms
 
     subi r19, 1
     sbci r20, 0
     brne wait_duration_loop
     ret
+    ; technically, there's some error with the overhead of this loop, but compared to hundreds of milliseconds, it's negligible.
+    ; (and I'm lazy)
 
 play_note:
     ; play note with frequency in X for duration in Y
@@ -149,17 +145,23 @@ note_on:
     sts OCR1AH, XH
     sts OCR1AL, XL
 
+    ; need to use sts instead of out since out only works till 0x3F, and OCR1A is at 0x88
+
     ; set timer1 to CTC mode, toggle OC1A on compare match, prescaler = 0b001 (no prescaling)
-    ldi r23, 0b00001001 ; 0x09, CTC mode, toggle OC1A on compare match, prescaler = 1
+    ldi r23, 0b00001001
     sts TCCR1B, r23
 
+    ; CTC auto-clears the timer after matching with OCR1A
+    ; auto-toggle... automatically toggles the output pin on compare match, which is what we want for a square wave
+    ; so we don't have to deal with interrupts
+    ; prescaler just divides the clock in case our OCR1A value is greater than 0xFFFF. Didn't end up needing it for rickroll
 
     ret
 
 note_off:
     ; turn off note with frequency in X
 
-    ; turn off timer1
+    ; just turn off timer1
     ldi r23, 0b00000000 ; 0x00, stop
     sts TCCR1B, r23
     sts TCCR1A, r23
@@ -167,6 +169,10 @@ note_off:
     ret
 
 midi_events:
+    ; never gonna give you up
+    ; never gonna let you down
+    ; never gonna turn around and desert you
+    ; ...
     .dw $3BBF, $02ED
     .dw $0000, $0029
     .dw $353B, $0464
